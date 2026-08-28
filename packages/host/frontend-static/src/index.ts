@@ -12,13 +12,14 @@
  * @module @deepseek-ai/dsh-host-frontend-static
  */
 
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-client-connection'
+import { CONFIGURATION_PROBE_GLOBAL } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import { renderIndexInjections } from '@deepseek-ai/dsh-host-webserver'
 
 /** Stable Cordis plugin name. */
 export const name = 'frontend-static'
@@ -117,9 +118,13 @@ export function apply(ctx: Context, config: Config): void {
   // static directory; served pages also answer deep SPA-fallback paths, where
   // relative asset URLs would resolve under the request directory, so the
   // served form anchors them at the site root ahead of every URL-bearing tag.
-  const renderIndex = async (): Promise<string> => {
+  const renderIndex = async (request: IncomingMessage): Promise<string> => {
     const body = ctx.webServer.renderIndex(await readFile(distIndex, 'utf8'))
-    return body.replace(/<head(?:\s[^>]*)?>/i, open => `${open}<base href="/">`)
+    return renderIndexInjections(body, [{
+      kind: 'global',
+      name: CONFIGURATION_PROBE_GLOBAL,
+      value: ctx.connection.configurationProbe(request),
+    }]).replace(/<head(?:\s[^>]*)?>/i, open => `${open}<base href="/">`)
   }
   ctx.effect(() => ctx.webServer.registerFallback(async (req, res) => {
     // Non-GET/HEAD without a matching named route is 405 (fallback-only
@@ -137,7 +142,7 @@ export function apply(ctx: Context, config: Config): void {
       distRoot,
       distIndex,
       () => ctx.connection.authorizeIndex(req, res),
-      renderIndex,
+      () => renderIndex(req),
     )
   }), 'frontend-static: fallback seat')
 }

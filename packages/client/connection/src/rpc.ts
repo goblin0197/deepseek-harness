@@ -3,6 +3,9 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
+/** Browser global set by the authenticated frontend index for configuration access. */
+export const CONFIGURATION_PROBE_GLOBAL = '__DSH_CONFIGURATION_PROBE__'
+
 /** Correlation id minted by a caller and echoed by the Connection response. */
 export type RpcId = Branded<'rpc-id'>
 
@@ -204,6 +207,13 @@ export interface HostConnectionHandle {
    * @returns rejection status, or undefined when the route may accept the request.
    */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
+
+  /**
+   * Check whether the direct TCP peer may receive Host configuration access.
+   * @param request - authenticated index or Host request with its peer socket.
+   * @returns true for loopback or a configured configuration client address.
+   */
+  configurationProbe(request: ConnectionTrustRequest): boolean
 
   /**
    * Authenticate one frontend index request, owning a token redirect or 401.

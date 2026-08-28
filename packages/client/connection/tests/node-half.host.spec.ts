@@ -35,9 +35,18 @@ function fakeHttpServer(
 }
 
 /** Bodyless GET carrying the given headers (enough for the trust fence + bridge). */
-function fakeRequest(headers: Record<string, string>, url = `${API_PATH}/session.list`): IncomingMessage {
+function fakeRequest(
+  headers: Record<string, string>,
+  url = `${API_PATH}/session.list`,
+  remoteAddress = '127.0.0.1',
+): IncomingMessage {
   const request = Readable.from([]) as unknown as IncomingMessage
-  Object.assign(request, { url, method: 'GET', headers })
+  Object.assign(request, {
+    url,
+    method: 'GET',
+    headers,
+    socket: { remoteAddress },
+  })
   return request
 }
 
@@ -81,7 +90,7 @@ function fakeResponse(): {
   return { response, state }
 }
 
-async function mounted(config?: { trustedHosts?: string[] }): Promise<{
+async function mounted(config?: { trustedHosts?: string[]; configurationClientAddresses?: string[] }): Promise<{
   routes: WebRoute[]
   upgrades: WebUpgradeRoute[]
   connection: HostConnectionHandle
@@ -141,6 +150,20 @@ describe('connection node half', () => {
     ctx.provide('webServer', fakeHttpServer(routes, upgrades) as WebServer)
     const fiber = ctx.plugin({ inject: [...inject], apply }, { trustedHosts: ['harness.internal/path'] })
     await expect(fiber).rejects.toThrow(/not a bare host\[:port\] authority/)
+    expect(routes).toHaveLength(0)
+    expect(upgrades).toHaveLength(0)
+  })
+
+  it('fails the load on a malformed configuration client address', async () => {
+    const routes: WebRoute[] = []
+    const upgrades: WebUpgradeRoute[] = []
+    const ctx = new Context()
+    provideBrowserCredentials(ctx)
+    ctx.provide('webServer', fakeHttpServer(routes, upgrades) as WebServer)
+    const fiber = ctx.plugin({ inject: [...inject], apply }, {
+      configurationClientAddresses: ['192.168.1.999'],
+    })
+    await expect(fiber).rejects.toThrow(/configurationClientAddresses entry/)
     expect(routes).toHaveLength(0)
     expect(upgrades).toHaveLength(0)
   })
@@ -221,6 +244,35 @@ describe('connection node half', () => {
       cookie: browserCookie(connection, 'harness.example:3080'),
     }), declared.response)
     expect(declared.state.status).toBe(404)
+    await dispose()
+  })
+
+  it('allows settings only for a configured client source address', async () => {
+    const { routes, connection, dispose } = await mounted({
+      trustedHosts: ['192.168.1.100'],
+      configurationClientAddresses: ['192.168.1.249'],
+    })
+    const authority = '192.168.1.100:3080'
+    const cookie = browserCookie(connection, authority)
+    const settingsPath = `${API_PATH}/settings/describe`
+
+    const allowed = fakeResponse()
+    await routes[0]!.handler(
+      fakeRequest({ host: authority, cookie }, settingsPath, '192.168.1.249'),
+      allowed.response,
+    )
+    expect(allowed.state.status).toBe(404)
+    expect(connection.configurationProbe(fakeRequest({ host: authority }, settingsPath, '192.168.1.249')))
+      .toBe(true)
+
+    const denied = fakeResponse()
+    await routes[0]!.handler(
+      fakeRequest({ host: authority, cookie }, settingsPath, '192.168.1.250'),
+      denied.response,
+    )
+    expect(denied.state).toMatchObject({ status: 403, body: 'forbidden' })
+    expect(connection.configurationProbe(fakeRequest({ host: authority }, settingsPath, '192.168.1.250')))
+      .toBe(false)
     await dispose()
   })
 

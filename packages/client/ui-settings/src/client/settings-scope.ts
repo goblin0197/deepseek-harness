@@ -288,7 +288,7 @@ export class SettingsScopeBinder extends Service {
       this.wire,
       spec,
       this.mirror,
-      connection.isLoopback ? 'host' : 'memory',
+      connection.configurationProbe ? 'host' : 'memory',
       this.schema,
     )
     ctx.effect(() => {

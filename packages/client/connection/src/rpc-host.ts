@@ -9,7 +9,11 @@ import {
 } from './rpc.ts'
 import { clientRequestSchema } from './rpc-schema.ts'
 import { bridge, type FetchHandler } from './http-bridge.ts'
-import { isTrustedApiRequest } from './api-request-trust.ts'
+import {
+  isConfigurationApiRequest,
+  isConfigurationClient,
+  isTrustedApiRequest,
+} from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type { BrowserAuth } from './browser-auth.ts'
 import type {
@@ -70,6 +74,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     ctx: Context,
     private readonly trustedHosts: readonly string[],
     private readonly browserAuth: BrowserAuth,
+    private readonly configurationClientAddresses: readonly string[] = [],
   ) {
     super(ctx, 'connection')
   }
@@ -95,7 +100,15 @@ export class HostConnectionService extends Service implements HostConnectionHand
   /** Apply the configured Host/Origin fence, then browser authentication. */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
     if (!isTrustedApiRequest(request, this.trustedHosts)) return 403
-    return this.browserAuth.isAuthenticated(request) ? undefined : 401
+    if (!this.browserAuth.isAuthenticated(request)) return 401
+    if (isConfigurationApiRequest(request)
+      && !isConfigurationClient(request, this.configurationClientAddresses)) return 403
+    return undefined
+  }
+
+  /** Whether an authenticated index request may receive Host configuration access. */
+  configurationProbe(request: ConnectionTrustRequest): boolean {
+    return isConfigurationClient(request, this.configurationClientAddresses)
   }
 
   /** Authenticate an index request through the process-token exchange or cookie. */

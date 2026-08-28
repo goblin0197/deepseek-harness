@@ -15,6 +15,12 @@
 
 import { isLoopbackHostname } from './loopback-hostname.ts'
 import type { ConnectionTrustRequest } from './rpc.ts'
+import { isIP } from 'node:net'
+
+type NodeRequestFacts = ConnectionTrustRequest & {
+  readonly socket?: unknown
+  readonly url?: unknown
+}
 
 function header(headers: ConnectionTrustRequest['headers'], name: string): string | undefined {
   if (headers instanceof Headers) return headers.get(name) ?? undefined
@@ -115,4 +121,65 @@ export function isTrustedApiRequest(request: ConnectionTrustRequest, trustedHost
   } catch {
     return false
   }
+}
+
+/**
+ * Validate one configured TCP client address. The address is matched against
+ * Node's direct socket peer; forwarded headers are deliberately ignored.
+ * @param entry - configured IPv4 or IPv6 literal.
+ */
+export function assertConfigurationClientAddress(entry: string): void {
+  if (entry !== entry.trim() || isIP(entry) === 0) {
+    throw new Error(
+      `client-connection: configurationClientAddresses entry ${JSON.stringify(entry)} is not an IP address`,
+    )
+  }
+}
+
+/**
+ * Whether a request came from loopback or one configured direct socket peer.
+ * @param request - Node HTTP request facts containing the peer socket.
+ * @param allowedAddresses - configured non-loopback client addresses.
+ * @returns true when the peer may use Host configuration.
+ */
+export function isConfigurationClient(request: ConnectionTrustRequest, allowedAddresses: readonly string[]): boolean {
+  const address = requestRemoteAddress(request)
+  if (address === undefined) return false
+  const normalized = normalizeClientAddress(address)
+  if (normalized === undefined) return false
+  if (isLoopbackClientAddress(normalized)) return true
+  return allowedAddresses.some(entry => normalizeClientAddress(entry) === normalized)
+}
+
+/**
+ * Whether a request pathname belongs to the Host settings Remote namespace.
+ * @param request - request facts containing the URL to classify.
+ * @returns true for `/api/settings` and descendants.
+ */
+export function isConfigurationApiRequest(request: ConnectionTrustRequest): boolean {
+  const url = (request as NodeRequestFacts).url
+  if (typeof url !== 'string') return false
+  try {
+    const pathname = new URL(url, 'http://dsh.internal').pathname
+    return pathname === '/api/settings' || pathname.startsWith('/api/settings/')
+  } catch {
+    return false
+  }
+}
+
+function requestRemoteAddress(request: ConnectionTrustRequest): string | undefined {
+  const socket = (request as NodeRequestFacts).socket
+  if (typeof socket !== 'object' || socket === null) return undefined
+  const address = (socket as { readonly remoteAddress?: unknown }).remoteAddress
+  return typeof address === 'string' ? address : undefined
+}
+
+function normalizeClientAddress(address: string): string | undefined {
+  const mapped = address.toLowerCase().startsWith('::ffff:') ? address.slice(7) : address
+  if (isIP(mapped) === 4) return mapped
+  return isIP(address) === 6 ? address.toLowerCase() : undefined
+}
+
+function isLoopbackClientAddress(address: string): boolean {
+  return address === '::1' || isLoopbackHostname(address)
 }

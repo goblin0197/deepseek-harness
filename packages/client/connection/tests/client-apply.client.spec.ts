@@ -14,11 +14,13 @@ import {
 type Win = {
   location?: { hostname: string; search: string; origin?: string }
   __DSH_TRANSPORT__?: ClientTransportHooks
+  __DSH_CONFIGURATION_PROBE__?: boolean
 }
 
 afterEach(() => {
   delete (globalThis as Win).location
   delete (globalThis as Win).__DSH_TRANSPORT__
+  delete (globalThis as Win).__DSH_CONFIGURATION_PROBE__
 })
 
 class GenerationProbe {
@@ -80,6 +82,14 @@ describe('connection client apply', () => {
   it('reports non-loopback page authority through the connection handle', async () => {
     ;(globalThis as Win).location = { hostname: '192.0.2.20', search: '' }
     expect((await mount()).isLoopback).toBe(false)
+  })
+
+  it('reads the server-declared configuration capability independently of page authority', async () => {
+    ;(globalThis as Win).location = { hostname: '192.168.1.100', search: '' }
+    ;(globalThis as Win).__DSH_CONFIGURATION_PROBE__ = true
+    const handle = await mount()
+    expect(handle.isLoopback).toBe(false)
+    expect(handle.configurationProbe).toBe(true)
   })
 
   it('requires one generation source and ignores a stale source disposer', async () => {

@@ -14,6 +14,7 @@ import { createFixtureConnectionRpc } from './fixture.ts'
 import { createWebConnectionRpc, type RpcFetch, type RpcStreamOpen } from './rpc.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
+import { CONFIGURATION_PROBE_GLOBAL } from '../rpc.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -52,6 +53,8 @@ export type {
   ClientConnectionRpc, ConnectionRpcFailure, ConnectionRpcResult,
 } from '../rpc.ts'
 export type { RpcFetch } from './rpc.ts'
+
+export { CONFIGURATION_PROBE_GLOBAL } from '../rpc.ts'
 
 /** Observable identity and Host facts for the active connection generation. */
 export interface ConnectionGenerationState {
@@ -109,6 +112,8 @@ export interface ConnectionHandle {
    * ({@link ClientTransportHooks.ownsHost}), or the context is not a browser.
    */
   readonly isLoopback: boolean
+  /** Whether this authenticated browser may access Host configuration. */
+  readonly configurationProbe: boolean
   /** Current Remote event generation and the Host facts carried by its opening frame. */
   readonly generation: ConnectionGenerationState
   /** Generic logical RPC channels over the same Connection transport. */
@@ -168,8 +173,11 @@ export function apply(ctx: Context): void {
     current.controller.stop()
     publishGeneration(undefined)
   }
+  const isLoopback = transport?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname)
   const handle: ConnectionHandle = {
-    isLoopback: transport?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    isLoopback,
+    configurationProbe: isLoopback
+      || (globalThis as Record<string, unknown>)[CONFIGURATION_PROBE_GLOBAL] === true,
     generation: {
       getSnapshot: () => generation,
       subscribe: (listener) => {
